@@ -56,12 +56,23 @@ def CreateSandbox(dire, proj):
                 System('svn checkout file://%s %s' %(svndb, svn1))
     return GitSome(os.path.join(dire, proj), {'svn1': svndb})
 def AddRand(gs, size):
-    filename = 'foo-%000d' %random.randrange(10)
-    svnpath = os.path.join(gs.gitdire, gsd, gs.svndefault, filename)
-    print('Write %d bytes into %r' %(size, svnpath))
-    with open(svnpath, 'w') as f:
-        f.write(b'x'*size)
-    #with cd(gs.
+    with cd(gs.gitdire):
+        dirname = gs.svndefault
+        dirpath = dirname # TODO: might be in sub-dir
+        mkdir(dirpath)
+        svndirpath = os.path.join(gsd, dirname)
+        mkdir(svndirpath)
+        svnreldirpath = svndirpath # TODO: might need ../../....
+        System('ln -sfn %s %s' %(svnreldirpath, dirname))
+        filename = 'foo-%000d' %random.randrange(10)
+        filepath = os.path.join(filename) # TODO: Allow files in sub-dirs of link-dir
+        svnpath = os.path.join(svndirpath, filepath)
+        print('Write %d bytes into %r' %(size, svnpath))
+        with open(svnpath, 'w') as f:
+            f.write(b'x'*size)
+        with cd(svndirpath):
+            System('svn add %s' %filepath)
+            System('svn commit -m added')
 def AddRands(gs, n, size):
     for i in range(n):
         AddRand(gs, size)
