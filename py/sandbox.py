@@ -44,10 +44,29 @@ class GitSome(object):
         This allows you to forget about git-some for this dirlink.
         You probably want to Unlock first.
         '''
+    def _Link(self, path, repo):
+        dirname = gs.svndefault
+        dirpath = dirname # TODO: might be in sub-dir
+        mkdir(dirpath)
+        svndirpath = os.path.join(gsd, dirname)
+        mkdir(svndirpath)
+        svnreldirpath = svndirpath # TODO: might need ../../....
+        System('ln -sfn %s %s' %(svnreldirpath, dirname))
+        with cd(svndirpath):
+            System('svn add %s' %dirtree)
+            System('svn commit -m added')
     def Link(self, path, repo=None):
         '''Move path-tree (relative to git-dir) into repo (under .git/some/repo/rev/).
         Add it to repo and commit.
         Then create symlink from path.
+        '''
+        if repo is None:
+            repo = self.svndefault
+        with cd(gs.gitdire):
+            return self._Link(path, repo)
+    def Relink(self, path, repo=None):
+        '''Re-create symlink.
+        Maybe revision changed. Or maybe we have directory-versions.
         '''
     def Unlock(self, path, repo=None):
         '''Make path in repo (under .git/some) writable.
