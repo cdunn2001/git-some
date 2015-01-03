@@ -33,18 +33,12 @@ def System(cmd):
 def SvnCreate(dire):
     System('svnadmin create --fs-type fsfs %s' %dire)
     return os.path.abspath(dire)
-class GitSome(object):
-    def __init__(self, gitdire, svndirmap):
+class GitOne(object):
+    def __init__(self, gitdire, svnname, svndire):
         self.gitdire = gitdire
-        self.svndbdirmap = svndirmap
-        self.svndefault = svndirmap.keys()[0]
-    def Unlink(self, path, repo=None):
-        '''Remove symlink (if any).
-        Copy linked dir-tree from repo to where path was.
-        This allows you to forget about git-some for this dirlink.
-        You probably want to Unlock first.
-        '''
-    def _Link(self, path, repo):
+        self.repo = svnname
+        self.svndire = svndire
+    def Subvert(self, path):
         dirname = gs.svndefault
         dirpath = dirname # TODO: might be in sub-dir
         mkdir(dirpath)
@@ -55,26 +49,60 @@ class GitSome(object):
         with cd(svndirpath):
             System('svn add %s' %dirtree)
             System('svn commit -m added')
-    def Link(self, path, repo=None):
+    def Refresh(self, path, repo):
+        with cd(os.path.dirname(path)):
+            svnrelpath = os.readlink(path)
+            if not os.path.exists(svnrelpath):
+                # Get part after .git/some.
+                svnpath = svnrelpath.
+                cmd = 'svn export %s%s' %(self.repo, svnpath)
+                with cd(os.path.dirname(svnrelpath)):
+                    # export?
+            assert os.path.exists(svnrelpath)
+        assert os.path.exists(path)
+    def Relink(self, path, rev, repo):
+        # Modify symlink, then ...
+        self._Refresh(path, repo)
+class GitSome(object):
+    def __init__(self, gitdire, svndirmap):
+        self.gitdire = gitdire
+        self.svndbdirmap = svndirmap
+        self.svndefault = svndirmap.keys()[0]
+    def Reconstruct(self, path, repo=None):
+        '''Remove symlink (if any).
+        Copy linked dir-tree from repo to where path was.
+        This allows you to forget about git-some for this dirlink.
+        You probably want to Unlock first.
+        '''
+    def Subvert(self, path, repo=None):
         '''Move path-tree (relative to git-dir) into repo (under .git/some/repo/rev/).
         Add it to repo and commit.
         Then create symlink from path.
         '''
-        if repo is None:
-            repo = self.svndefault
+        if repo is None: repo = self.svndefault
         with cd(gs.gitdire):
             return self._Link(path, repo)
-    def Relink(self, path, repo=None):
+    def Refresh(self, path, rev, repo=None):
         '''Re-create symlink.
         Maybe revision changed. Or maybe we have directory-versions.
         '''
-    def Unlock(self, path, repo=None):
-        '''Make path in repo (under .git/some) writable.
+        if repo is None: repo = self.svndefault
+        with cd(gs.gitdire):
+            return self._Relink(path, repo)
+    def Relink(self, path, rev, repo=None):
+        '''Re-create symlink.
+        Maybe revision changed. Or maybe we have directory-versions.
         '''
+        if repo is None: repo = self.svndefault
+        with cd(gs.gitdire):
+            return self._Relink(path, repo)
     def Commit(self, path, repo=None):
         '''Commit within repo.
         Then move the repo to its new revision-number, and symlink it.
         Then 'git add' the new symlink.
+        '''
+    def Unlock(self, path, repo=None):
+        '''Make path in repo (under .git/some) writable.
         '''
     def Lock(self, path, repo=None):
         '''Make path in repo (under .git/some) read-only.
@@ -114,23 +142,30 @@ def AddRand(gs, size):
         with cd(svndirpath):
             System('svn add %s' %filepath)
             System('svn commit -m added')
-def WriteRand(size):
+def RandFilename(base='foo-%000d', r=10):
+    return base%random.randrange(r)
+def WriteRand(filename, size):
     '''into cwd'''
-    filename = 'foo-%000d' %random.randrange(10)
     print('Write %d bytes into %r' %(size, filename))
-    with open(filename, 'w') as f:
+    with open(filename, 'wb') as f:
         f.write(b'x'*size)
-    return filename
 def WriteRands(n, size):
     '''into cwd'''
     for i in range(n):
-        WriteRand(size)
+        filename = RandFilename('foo-%000d', 10)
+        WriteRand(filename, size)
 def Play(gs):
     with cd(gs.gitdire):
         path = 'bin'
         with mkdir(path):
             WriteRands(1, 1)
-        gs.Link(path)
+        gs.Subvert(path)  # Move path into .git; Revise; overwrite; Commit.
+        gs.Refresh(path)  # Ensure symlink points somewhere.
+        gs.Relink(path, 'r2')  # Modify symlink and Refresh.
+        gs.Revise(path)  # Symlink a checked-out repo.
+        WriteRand(os.path.join(path, RandFilename()))
+        gs.Commit(path)  # Commit the sandbox, then Relink to latest revision.
+        gs.Reconstruct(path)  # Undo all.
 def Main(prog, dire, proj):
     gs = CreateSandbox(dire, proj)
     Play(gs)
