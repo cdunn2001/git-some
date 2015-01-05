@@ -1,7 +1,7 @@
 #!/usr/bin/env python2.7
 from __future__ import print_function
 from contextlib import contextmanager
-import os, sys, random
+import os, sys, random, json, commands
 
 # git-some dir:
 gsd = os.path.join('.git', 'some')
@@ -29,17 +29,43 @@ def System(cmd):
     print(cmd)
     status = os.system(cmd)
     if status:
+        raise Exception('%s <- system(%s)' %(status, cmd))
+def PipeRead(cmd):
+    print(cmd)
+    status, out = commands.getstatusoutput(cmd)
+    if status:
         raise Exception('%s <- `%s`' %(status, cmd))
+    return out
 def SvnCreate(dire):
     System('svnadmin create --fs-type fsfs %s' %dire)
+    return 'file://' + os.path.abspath(dire)
+def GitInit(dire):
+    with mkdir(dire):
+        System('git init')
     return os.path.abspath(dire)
+class WithCD(object):
+    """Decorate all methods of another object to
+    change directory first.
+    NOT CURRENTLY USED.
+    http://stackoverflow.com/questions/6704151/python-equivalent-of-rubys-method-missing
+    """
+    def __init__(self, dire):
+        self.dire = dire
+
 class GitOne(object):
-    def __init__(self, gitdire, svnname, svndire):
+    """These methods should be called from the 'gitdire',
+    as some paths are relative to that.
+    """
+    def __init__(self, gitdire, name, svnrepo):
         self.gitdire = gitdire
-        self.repo = svnname
-        self.svndire = svndire
+        self.name = name
+        self.svnrepo = svnrepo
+    def GetCacheDire(self):
+        """Relative to GSD.
+        """
+        return os.path.join(gsd, self.svnname)
     def Subvert(self, path):
-        dirname = gs.svndefault
+        dirname = self.svndire
         dirpath = dirname # TODO: might be in sub-dir
         mkdir(dirpath)
         svndirpath = os.path.join(gsd, dirname)
@@ -49,15 +75,27 @@ class GitOne(object):
         with cd(svndirpath):
             System('svn add %s' %dirtree)
             System('svn commit -m added')
+    def RefreshLink(self, link):
+        with mkdir(gsd):
+            name = self.name
+            path = os.readlink(link)
+            svndb = self.svndb
+            #System('svn checkout file://%s %s' %(svndb, name))
+            System('svn export %s/%s %s/%s' %(svnrepo, path, name, path))
     def Refresh(self, path, repo):
+        """Assume in base of git-work-dir.
+        """
+        links = self.GetSymlinks()
+        for link in links:
+            self.RefreshLink(link)
         with cd(os.path.dirname(path)):
             svnrelpath = os.readlink(path)
             if not os.path.exists(svnrelpath):
                 # Get part after .git/some.
-                svnpath = svnrelpath.
+                svnpath = svnrelpath # HUH?
                 cmd = 'svn export %s%s' %(self.repo, svnpath)
                 with cd(os.path.dirname(svnrelpath)):
-                    # export?
+                    pass # export?
             assert os.path.exists(svnrelpath)
         assert os.path.exists(path)
     def Relink(self, path, rev, repo):
@@ -80,7 +118,7 @@ class GitSome(object):
         Then create symlink from path.
         '''
         if repo is None: repo = self.svndefault
-        with cd(gs.gitdire):
+        with cd(self.gitdire):
             return self._Link(path, repo)
     def Refresh(self, path, rev, repo=None):
         '''Re-create symlink.
@@ -107,7 +145,8 @@ class GitSome(object):
     def Lock(self, path, repo=None):
         '''Make path in repo (under .git/some) read-only.
         '''
-def CreateSandbox(dire, proj):
+def RmDir(dire):
+    dire = os.path.abspath(dire)
     if os.path.exists(dire):
         cmd = 'rm -rf %s' %dire
         msg = cmd + '?'
@@ -116,14 +155,46 @@ def CreateSandbox(dire, proj):
         if yes and yes[0] == 'n':
             raise Exception(msg + yes)
         System(cmd)
+def CreateSandbox(dire, proj):
+    RmDir(dire)
     with mkdir(dire):
         svndb = SvnCreate('binaries-proj')
-        with mkdir(proj):
-            System('git init')
-            with mkdir(gsd):
-                svn1 = 'svn1'
-                System('svn checkout file://%s %s' %(svndb, svn1))
-    return GitSome(os.path.join(dire, proj), {'svn1': svndb})
+        gitwd = GitInit(os.path.join(dire, proj))
+        print(svndb, gitwd)
+    rev = GetSvnInfoRevision(PopulateSvn(os.path.join(svndb, 'base'), 'base'))
+    with cd(os.path.join(gitwd)):
+        os.symlink('.git/some/svn1/base', 'base')
+        meta = {'links': {
+            'base': 'svn1/r%d/base'%rev,
+            },
+        }
+        with open('.git-some', 'w') as f:
+            f.write(json.dumps(meta))
+    return svndb, gitwd
+def PopulateTree(dirtree, n, size):
+    with mkdir(dirtree):
+        WriteRands(n, size)
+def PopulateSvn(svnpath, dirtree):
+    """Can be rel to CWD.
+    Ex. PopulateSvn('file://foo-svn/base', 'base')
+    return svn info
+    """
+    PopulateTree(dirtree, 1, 3)
+    # Import the contents of 'dirtree' into 'svnpath'.
+    # If you want the basename of in svn, append it to svnpath.
+    cmd = "svn import -m 'PopulateSvn()' %s %s" %(dirtree, svnpath)
+    System(cmd)
+    RmDir(dirtree)
+    info = PipeRead("svn info %s" %svnpath)
+    return info
+def GetSvnInfoRevision(info):
+    print(info)
+    print(list(line.split(':', 1) for line in info.split('\n')))
+    print(list(list(s.strip() for s in line.split(':', 1)) for line in
+            info.split('\n') if line.strip()))
+    infod = dict((s.strip() for s in line.split(':', 1)) for line in
+            info.split('\n') if line.strip())
+    return int(infod['Revision'])
 def AddRand(gs, size):
     with cd(gs.gitdire):
         dirname = gs.svndefault
@@ -156,19 +227,24 @@ def WriteRands(n, size):
         WriteRand(filename, size)
 def Play(gs):
     with cd(gs.gitdire):
+        path = ''
+        gs.Refresh(path)  # Ensure symlink points somewhere.
+        return
         path = 'bin'
         with mkdir(path):
             WriteRands(1, 1)
-        gs.Subvert(path)  # Move path into .git; Revise; overwrite; Commit.
+        #gs.Subvert(path)  # Move path into .git; Revise; overwrite; Commit.
+        path = ''
         gs.Refresh(path)  # Ensure symlink points somewhere.
-        gs.Relink(path, 'r2')  # Modify symlink and Refresh.
-        gs.Revise(path)  # Symlink a checked-out repo.
-        WriteRand(os.path.join(path, RandFilename()))
-        gs.Commit(path)  # Commit the sandbox, then Relink to latest revision.
-        gs.Reconstruct(path)  # Undo all.
+        #gs.Relink(path, 'r2')  # Modify symlink and Refresh.
+        #gs.Revise(path)  # Symlink a checked-out repo.
+        #WriteRand(os.path.join(path, RandFilename()))
+        #gs.Commit(path)  # Commit the sandbox, then Relink to latest revision.
+        #gs.Reconstruct(path)  # Undo all.
 def Main(prog, dire, proj):
-    gs = CreateSandbox(dire, proj)
-    Play(gs)
+    svnrepo, gitwd = CreateSandbox(dire, proj)
+    gs = GitOne(gitwd, 'svn1', svnrepo)
+    #Play(gs)
     #AddRand(gs, 1)
 if __name__=="__main__":
     Main(*sys.argv)
