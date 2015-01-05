@@ -4,7 +4,11 @@ from contextlib import contextmanager
 import os, sys, random, json, commands
 
 # git-some dir:
-gsd = os.path.join('.git', 'some')
+gsd = os.path.join('.git', 'some-cache')
+# meta-data (dbs):
+gsm = os.path.join('.git', 'some-info')
+# symlinks file:
+gsl = '.git-some'
 
 _dirstack = list('.')
 
@@ -76,10 +80,14 @@ class GitOne(object):
             System('svn add %s' %dirtree)
             System('svn commit -m added')
     def RefreshLink(self, link):
+        if os.path.exists(link):
+            print(link, 'exists!')
+            return
         with mkdir(gsd):
             name = self.name
             path = os.readlink(link)
-            svndb = self.svndb
+            metadata = json.loads(open(gsm).read())
+            svndb = metadata['svn'][self.name]
             #System('svn checkout file://%s %s' %(svndb, name))
             System('svn export %s/%s %s/%s' %(svnrepo, path, name, path))
     def Refresh(self, path, repo):
@@ -161,15 +169,23 @@ def CreateSandbox(dire, proj):
         svndb = SvnCreate('binaries-proj')
         gitwd = GitInit(os.path.join(dire, proj))
         print(svndb, gitwd)
-    rev = GetSvnInfoRevision(PopulateSvn(os.path.join(svndb, 'base'), 'base'))
+    # It's all about that base.
+    base = 'base' # just a random directory name to populate
+    rev = GetSvnInfoRevision(PopulateSvn(os.path.join(svndb, base), base))
     with cd(os.path.join(gitwd)):
-        os.symlink('.git/some/svn1/base', 'base')
-        meta = {'links': {
-            'base': 'svn1/r%d/base'%rev,
+        os.symlink('.git/some/svn1/%s'%base, base)
+        linksdata = {'links': {
+            base: 'svn1/r%d/%s'%(rev, base),
             },
         }
-        with open('.git-some', 'w') as f:
-            f.write(json.dumps(meta))
+        metadata = {'svn': {
+            'svn1': svndb,
+            },
+        }
+        with open(gsl, 'w') as f:
+            f.write(json.dumps(linksdata))
+        with open(gsm, 'w') as f:
+            f.write(json.dumps(metadata))
     return svndb, gitwd
 def PopulateTree(dirtree, n, size):
     with mkdir(dirtree):
