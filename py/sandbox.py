@@ -15,7 +15,14 @@ _dirstack = list('.')
 @contextmanager
 def cd(newdir):
     prevdir = os.getcwd()
-    #_dirstack.push(prevdir)
+    os.chdir(newdir)
+    print(' In: %r' %os.path.abspath(newdir))
+    yield
+    os.chdir(prevdir)
+    print(' To: %r' %os.path.abspath(prevdir))
+@contextmanager
+def cdt(newdir):
+    prevdir = os.getcwd()
     os.chdir(newdir)
     print(' In: %r' %os.path.abspath(newdir))
     try:
@@ -79,23 +86,40 @@ class GitOne(object):
         with cd(svndirpath):
             System('svn add %s' %dirtree)
             System('svn commit -m added')
+    def GetNameRevPath(self, link):
+        """Assume link similar to
+          ../../.git/some-cache/svnname/r1/path/subpath/subsubpath
+        """
+        linkedpath = os.readlink(link)
+        dirs = linkedpath.split(os.path.sep)
+        fromgit = dirs[dirs.index('.git'):] # hopefully skipping only '..'s
+        assert gsd == os.path.join(*dirs[0:2]), "Maybe git-annex? %r"%dirs
+        name = dirs[2]
+        rev = dirs[3]
+        repopath = os.path.join(*dirs[3:])
+        return name, rev, repopath
     def RefreshLink(self, link):
         if os.path.exists(link):
             print(link, 'exists!')
             return
+        name, rev, repopath = self.GetNameRevPath(link)
+        assert name == self.name, "%r != %r"%(name, self.name)  # for now
+        metadata = json.loads(open(gsm).read())
+        svnroot = metadata['svnroots'][self.name]
         with mkdir(gsd):
-            name = self.name
-            path = os.readlink(link)
-            metadata = json.loads(open(gsm).read())
-            svndb = metadata['svn'][self.name]
             #System('svn checkout file://%s %s' %(svndb, name))
-            System('svn export %s/%s %s/%s' %(svnrepo, path, name, path))
-    def Refresh(self, path, repo):
+            System('svn export %s/%s %s/%s' %(svnroot, repopath, name, repopath))
+        assert os.path.exists(link)
+    def GetSymlinks(self):
+        linksdata = json.loads(open(gsl).read())
+        return linksdata['links']
+    def Refresh(self):
         """Assume in base of git-work-dir.
         """
         links = self.GetSymlinks()
         for link in links:
             self.RefreshLink(link)
+        return
         with cd(os.path.dirname(path)):
             svnrelpath = os.readlink(path)
             if not os.path.exists(svnrelpath):
@@ -173,12 +197,13 @@ def CreateSandbox(dire, proj):
     base = 'base' # just a random directory name to populate
     rev = GetSvnInfoRevision(PopulateSvn(os.path.join(svndb, base), base))
     with cd(os.path.join(gitwd)):
-        os.symlink('.git/some/svn1/%s'%base, base)
+        linkedpath = os.path.join(gsd, 'svn1', base)
+        os.symlink(linkedpath, base)
         linksdata = {'links': {
             base: 'svn1/r%d/%s'%(rev, base),
             },
         }
-        metadata = {'svn': {
+        metadata = {'svnroots': {
             'svn1': svndb,
             },
         }
@@ -243,8 +268,8 @@ def WriteRands(n, size):
         WriteRand(filename, size)
 def Play(gs):
     with cd(gs.gitdire):
-        path = ''
-        gs.Refresh(path)  # Ensure symlink points somewhere.
+        #path = ''
+        gs.Refresh()  # Ensure symlink points somewhere.
         return
         path = 'bin'
         with mkdir(path):
@@ -260,7 +285,7 @@ def Play(gs):
 def Main(prog, dire, proj):
     svnrepo, gitwd = CreateSandbox(dire, proj)
     gs = GitOne(gitwd, 'svn1', svnrepo)
-    #Play(gs)
+    Play(gs)
     #AddRand(gs, 1)
 if __name__=="__main__":
     Main(*sys.argv)
